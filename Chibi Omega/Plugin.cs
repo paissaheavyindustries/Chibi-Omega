@@ -94,7 +94,7 @@ namespace Chibi_Omega
                 {
                     Character bc = (Character)go;
                     CharacterStruct* bcs = (CharacterStruct*)bc.Address;
-                    if (bcs->ModelCharaId == 327)
+                    if (bcs->ModelCharaId == 327 || (bcs->ModelCharaId == 3771 && bcs->Health == 8557964))
                     {
                         GameObjectStruct *gos = (GameObjectStruct*)go.Address;
                         bcs->ModelScale = 0.1f;
