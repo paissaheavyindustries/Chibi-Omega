@@ -1,24 +1,22 @@
 ﻿using Dalamud.Game;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using Dalamud.Game.ClientState.Objects;
 using Dalamud.Game.ClientState.Objects.Types;
+using Character = Dalamud.Game.ClientState.Objects.Types.Character;
 using CharacterStruct = FFXIVClientStructs.FFXIV.Client.Game.Character.Character;
 using GameObjectStruct = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
-using Dalamud.Game.Gui;
-using Dalamud.Game.ClientState;
 using Dalamud.Game.Command;
 using ImGuiNET;
 using System.Threading.Tasks;
 using System.Numerics;
 using System.Diagnostics;
-using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using System;
 using Dalamud.Logging;
 using ImGuiScene;
 using System.Collections.Generic;
-using System.Runtime.Intrinsics.Arm;
-using Dalamud.Data;
+using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using Dalamud.Interface.Internal;
 
 namespace Chibi_Omega
 {
@@ -29,26 +27,23 @@ namespace Chibi_Omega
         public string Name => "Chibi Omega";
 
         private DalamudPluginInterface _pi { get; init; }
-        private ObjectTable _ot { get; init; }
-        private ChatGui _cg { get; init; }
-        private ClientState _cs { get; init; }
-        private CommandManager _cm { get; init; }
-        private DataManager _dm { get; init; }
+        private IObjectTable _ot { get; init; }
+        private IChatGui _cg { get; init; }
+        private IClientState _cs { get; init; }
+        private ICommandManager _cm { get; init; }
+        private ITextureProvider _tp { get; init; }
         private bool _lookingForOmega = false;
         internal Config _cfg = new Config();
         private float _adjusterX = 0.0f;
-        private Dictionary<int, TextureWrap> _textures = new Dictionary<int, TextureWrap>();
-
-        [PluginService]
-        public static SigScanner TargetModuleScanner { get; private set; }
+        private Dictionary<int, IDalamudTextureWrap> _textures = new Dictionary<int, IDalamudTextureWrap>();
 
         public Plugin(
             [RequiredVersion("1.0")] DalamudPluginInterface pluginInterface,
-            [RequiredVersion("1.0")] ObjectTable objectTable,
-            [RequiredVersion("1.0")] ClientState clientState,
-            [RequiredVersion("1.0")] ChatGui chatGui,
-            [RequiredVersion("1.0")] CommandManager commandManager,
-            [RequiredVersion("1.0")] DataManager dataManager
+            [RequiredVersion("1.0")] IObjectTable objectTable,
+            [RequiredVersion("1.0")] IClientState clientState,
+            [RequiredVersion("1.0")] IChatGui chatGui,
+            [RequiredVersion("1.0")] ICommandManager commandManager,
+            [RequiredVersion("1.0")] ITextureProvider textureProvider
         )
         {
             _pi = pluginInterface;
@@ -56,7 +51,7 @@ namespace Chibi_Omega
             _cg = chatGui;
             _cs = clientState;
             _cm = commandManager;
-            _dm = dataManager;
+            _tp = textureProvider;
             LoadTextures();
             _pi.UiBuilder.Draw += DrawConfigUI;
             _pi.UiBuilder.OpenConfigUi += OpenConfigUI;
@@ -66,10 +61,10 @@ namespace Chibi_Omega
             });
             _cfg = _pi.GetPluginConfig() as Config ?? new Config();
             _cs.TerritoryChanged += _cs_TerritoryChanged;
-            _cs_TerritoryChanged(null, _cs.TerritoryType);
+            _cs_TerritoryChanged(_cs.TerritoryType);
         }
 
-        private void _cs_TerritoryChanged(object sender, ushort e)
+        private void _cs_TerritoryChanged(ushort e)
         {
             if (e == 800 || e == 804 || e == 1122)
             {
@@ -99,7 +94,7 @@ namespace Chibi_Omega
 
         private void UnloadTextures()
         {
-            foreach (KeyValuePair<int, TextureWrap> kp in _textures)
+            foreach (KeyValuePair<int, IDalamudTextureWrap> kp in _textures)
             {
                 if (kp.Value != null)
                 {
@@ -109,9 +104,9 @@ namespace Chibi_Omega
             _textures.Clear();
         }
 
-        internal TextureWrap? GetTexture(uint id)
+        internal IDalamudTextureWrap? GetTexture(uint id)
         {
-            return _dm.GetImGuiTextureIcon(id);
+            return _tp.GetIcon(id);            
         }
 
         private void OnCommand(string command, string args)
@@ -165,22 +160,23 @@ namespace Chibi_Omega
             {
                 if (go is Character)
                 {
-                    Character bc = (Character)go;
+                    Character bc = (Character)go;                    
                     CharacterStruct* bcs = (CharacterStruct*)bc.Address;
+                    CharacterData cd = bcs->CharacterData;
                     if (
                         // alphascape version for testing
-                        (bcs->ModelCharaId == 327 && (_cfg.ApplyOnP1 == true || _cfg.ApplyOnP3 == true))
+                        (cd.ModelCharaId == 327 && (_cfg.ApplyOnP1 == true || _cfg.ApplyOnP3 == true))
                         ||
                         // p1 beetle
-                        (bcs->ModelCharaId == 3771 && bcs->Health == 8557964 && _cfg.ApplyOnP1 == true)
+                        (cd.ModelCharaId == 3771 && cd.Health == 8557964 && _cfg.ApplyOnP1 == true)
                         ||
                         // p3 final omg
-                        (bcs->ModelCharaId == 3775 && bcs->Health == 11125976 && _cfg.ApplyOnP3 == true)
+                        (cd.ModelCharaId == 3775 && cd.Health == 11125976 && _cfg.ApplyOnP3 == true)
                     )
                     {
                         GameObjectStruct *gos = (GameObjectStruct*)go.Address;
                         float scale;
-                        if ((bcs->ModelCharaId == 327 && _cfg.ApplyOnP1 == false) || bcs->ModelCharaId == 3775)
+                        if ((cd.ModelCharaId == 327 && _cfg.ApplyOnP1 == false) || cd.ModelCharaId == 3775)
                         {
                             scale = _cfg.ScaleP3;
                         }
@@ -188,7 +184,7 @@ namespace Chibi_Omega
                         {
                             scale = _cfg.ScaleP1;
                         }
-                        bcs->ModelScale = scale;
+                        cd.ModelScale = scale;
                         gos->Scale = scale;
                         return;
                     }
@@ -225,9 +221,9 @@ namespace Chibi_Omega
             fsz.Y -= ImGui.GetTextLineHeight() + (style.ItemSpacing.Y * 2) + style.WindowPadding.Y;
             ImGui.BeginChild("ChibiOmgFrame", fsz);
             Vector2 cps = ImGui.GetCursorPos();
-            ImGui.Image(_textures[1].ImGuiHandle, new Vector2(_textures[1].Width, _textures[1].Height));
+            ImGui.Image(_textures[1].ImGuiHandle, new Vector2(_textures[1].Width / 2, _textures[1].Height / 2));
             Vector2 cpsa = ImGui.GetCursorPos();
-            ImGui.SetCursorPos(new Vector2(cps.X + _textures[1].Width + 10, cps.Y));
+            ImGui.SetCursorPos(new Vector2(cps.X + (_textures[1].Width / 2) + 10, cps.Y));
             ImGui.TextWrapped("Please be aware that changes are not applied in real time, they apply after zoning in or wiping.");
             Vector2 cps2 = ImGui.GetCursorPos();
             ImGui.SetCursorPos(new Vector2(cpsa.X, Math.Max(cpsa.Y, cps2.Y)));
