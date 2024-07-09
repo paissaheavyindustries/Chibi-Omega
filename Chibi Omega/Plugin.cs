@@ -2,7 +2,7 @@
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Game.ClientState.Objects.Types;
-using Character = Dalamud.Game.ClientState.Objects.Types.Character;
+using Character = Dalamud.Game.ClientState.Objects.Types.ICharacter;
 using CharacterStruct = FFXIVClientStructs.FFXIV.Client.Game.Character.Character;
 using GameObjectStruct = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
 using Dalamud.Game.Command;
@@ -17,6 +17,8 @@ using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using Dalamud.Interface.Internal;
+using Dalamud.Interface.Textures;
+using Dalamud.Interface.Textures.TextureWraps;
 
 namespace Chibi_Omega
 {
@@ -26,24 +28,26 @@ namespace Chibi_Omega
 
         public string Name => "Chibi Omega";
 
-        private DalamudPluginInterface _pi { get; init; }
+        private IDalamudPluginInterface _pi { get; init; }
         private IObjectTable _ot { get; init; }
         private IChatGui _cg { get; init; }
         private IClientState _cs { get; init; }
         private ICommandManager _cm { get; init; }
         private ITextureProvider _tp { get; init; }
+        private IPluginLog _lo { get; init; }
         private bool _lookingForOmega = false;
         internal Config _cfg = new Config();
         private float _adjusterX = 0.0f;
-        private Dictionary<int, IDalamudTextureWrap> _textures = new Dictionary<int, IDalamudTextureWrap>();
+        private Dictionary<int, ISharedImmediateTexture> _textures = new Dictionary<int, ISharedImmediateTexture>();
 
         public Plugin(
-            [RequiredVersion("1.0")] DalamudPluginInterface pluginInterface,
-            [RequiredVersion("1.0")] IObjectTable objectTable,
-            [RequiredVersion("1.0")] IClientState clientState,
-            [RequiredVersion("1.0")] IChatGui chatGui,
-            [RequiredVersion("1.0")] ICommandManager commandManager,
-            [RequiredVersion("1.0")] ITextureProvider textureProvider
+            IDalamudPluginInterface pluginInterface,
+            IObjectTable objectTable,
+            IClientState clientState,
+            IChatGui chatGui,
+            ICommandManager commandManager,
+            ITextureProvider textureProvider,
+            IPluginLog log
         )
         {
             _pi = pluginInterface;
@@ -52,8 +56,10 @@ namespace Chibi_Omega
             _cs = clientState;
             _cm = commandManager;
             _tp = textureProvider;
+            _lo = log;
             LoadTextures();
             _pi.UiBuilder.Draw += DrawConfigUI;
+            _pi.UiBuilder.OpenMainUi += OpenConfigUI;
             _pi.UiBuilder.OpenConfigUi += OpenConfigUI;
             _cm.AddHandler("/chibiomega", new CommandInfo(OnCommand)
             {
@@ -68,12 +74,12 @@ namespace Chibi_Omega
         {
             if (e == 800 || e == 804 || e == 1122)
             {
-                PluginLog.Debug("We're in correct zone, start looking");
+                _lo.Debug("We're in correct zone, start looking");
                 StartLooking();
             }
             else
             {
-                PluginLog.Debug("Not in correct zone, stop looking");
+                _lo.Debug("Not in correct zone, stop looking");
                 StopLooking();
             }
         }
@@ -84,6 +90,7 @@ namespace Chibi_Omega
             SaveConfig();
             _pi.UiBuilder.Draw -= DrawConfigUI;
             _pi.UiBuilder.OpenConfigUi -= OpenConfigUI;
+            _pi.UiBuilder.OpenMainUi -= OpenConfigUI;
             UnloadTextures();
         }
 
@@ -94,19 +101,12 @@ namespace Chibi_Omega
 
         private void UnloadTextures()
         {
-            foreach (KeyValuePair<int, IDalamudTextureWrap> kp in _textures)
-            {
-                if (kp.Value != null)
-                {
-                    kp.Value.Dispose();
-                }
-            }
             _textures.Clear();
         }
 
-        internal IDalamudTextureWrap? GetTexture(uint id)
+        internal ISharedImmediateTexture GetTexture(uint id)
         {
-            return _tp.GetIcon(id);            
+            return _tp.GetFromGameIcon(new GameIconLookup() { IconId = id });
         }
 
         private void OnCommand(string command, string args)
@@ -116,7 +116,7 @@ namespace Chibi_Omega
 
         public void SaveConfig()
         {
-            PluginLog.Debug("Saving config");
+            _lo.Debug("Saving config");
             _pi.SavePluginConfig(_cfg);
         }
 
@@ -156,7 +156,7 @@ namespace Chibi_Omega
 
         private unsafe void ManipulateOmegaChan()
         {
-            foreach (GameObject go in _ot)
+            foreach (IGameObject go in _ot)
             {
                 if (go is Character)
                 {
@@ -221,9 +221,10 @@ namespace Chibi_Omega
             fsz.Y -= ImGui.GetTextLineHeight() + (style.ItemSpacing.Y * 2) + style.WindowPadding.Y;
             ImGui.BeginChild("ChibiOmgFrame", fsz);
             Vector2 cps = ImGui.GetCursorPos();
-            ImGui.Image(_textures[1].ImGuiHandle, new Vector2(_textures[1].Width / 2, _textures[1].Height / 2));
+            IDalamudTextureWrap tx = _textures[1].GetWrapOrEmpty();
+            ImGui.Image(tx.ImGuiHandle, new Vector2(tx.Width / 2, tx.Height / 2));
             Vector2 cpsa = ImGui.GetCursorPos();
-            ImGui.SetCursorPos(new Vector2(cps.X + (_textures[1].Width / 2) + 10, cps.Y));
+            ImGui.SetCursorPos(new Vector2(cps.X + (tx.Width / 2) + 10, cps.Y));
             ImGui.TextWrapped("Please be aware that changes are not applied in real time, they apply after zoning in or wiping.");
             Vector2 cps2 = ImGui.GetCursorPos();
             ImGui.SetCursorPos(new Vector2(cpsa.X, Math.Max(cpsa.Y, cps2.Y)));
@@ -279,26 +280,26 @@ namespace Chibi_Omega
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.4f, 0.4f, 1.0f));
             if (ImGui.Button("Discord") == true)
             {
-                Task tx = new Task(() =>
+                Task tsk = new Task(() =>
                 {
                     Process p = new Process();
                     p.StartInfo.UseShellExecute = true;
                     p.StartInfo.FileName = @"https://discord.gg/6f9MY55";
                     p.Start();
                 });
-                tx.Start();
+                tsk.Start();
             }
             ImGui.SameLine();
             if (ImGui.Button("GitHub") == true)
             {
-                Task tx = new Task(() =>
+                Task tsk = new Task(() =>
                 {
                     Process p = new Process();
                     p.StartInfo.UseShellExecute = true;
                     p.StartInfo.FileName = @"https://github.com/paissaheavyindustries/Chibi-Omega";
                     p.Start();
                 });
-                tx.Start();
+                tsk.Start();
             }
             ImGui.SameLine();
             _adjusterX += ImGui.GetContentRegionAvail().X;
