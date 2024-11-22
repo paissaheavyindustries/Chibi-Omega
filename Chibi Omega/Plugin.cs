@@ -11,12 +11,9 @@ using System.Threading.Tasks;
 using System.Numerics;
 using System.Diagnostics;
 using System;
-using Dalamud.Logging;
-using ImGuiScene;
 using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using Dalamud.Interface.Internal;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
 
@@ -28,58 +25,38 @@ namespace Chibi_Omega
 
         public string Name => "Chibi Omega";
 
-        private IDalamudPluginInterface _pi { get; init; }
-        private IObjectTable _ot { get; init; }
-        private IChatGui _cg { get; init; }
-        private IClientState _cs { get; init; }
-        private ICommandManager _cm { get; init; }
-        private ITextureProvider _tp { get; init; }
-        private IPluginLog _lo { get; init; }
+        private Service _svc = null;
         private bool _lookingForOmega = false;
         internal Config _cfg = new Config();
         private float _adjusterX = 0.0f;
         private Dictionary<int, ISharedImmediateTexture> _textures = new Dictionary<int, ISharedImmediateTexture>();
 
-        public Plugin(
-            IDalamudPluginInterface pluginInterface,
-            IObjectTable objectTable,
-            IClientState clientState,
-            IChatGui chatGui,
-            ICommandManager commandManager,
-            ITextureProvider textureProvider,
-            IPluginLog log
-        )
+        public Plugin(IDalamudPluginInterface pluginInterface)
         {
-            _pi = pluginInterface;
-            _ot = objectTable;
-            _cg = chatGui;
-            _cs = clientState;
-            _cm = commandManager;
-            _tp = textureProvider;
-            _lo = log;
+            _svc = pluginInterface.Create<Service>();
             LoadTextures();
-            _pi.UiBuilder.Draw += DrawConfigUI;
-            _pi.UiBuilder.OpenMainUi += OpenConfigUI;
-            _pi.UiBuilder.OpenConfigUi += OpenConfigUI;
-            _cm.AddHandler("/chibiomega", new CommandInfo(OnCommand)
+            _svc.pi.UiBuilder.Draw += DrawConfigUI;
+            _svc.pi.UiBuilder.OpenMainUi += OpenConfigUI;
+            _svc.pi.UiBuilder.OpenConfigUi += OpenConfigUI;
+            _svc.cm.AddHandler("/chibiomega", new CommandInfo(OnCommand)
             {
                 HelpMessage = "Open Chibi Omega configuration"
             });
-            _cfg = _pi.GetPluginConfig() as Config ?? new Config();
-            _cs.TerritoryChanged += _cs_TerritoryChanged;
-            _cs_TerritoryChanged(_cs.TerritoryType);
+            _cfg = _svc.pi.GetPluginConfig() as Config ?? new Config();
+            _svc.cs.TerritoryChanged += _cs_TerritoryChanged;
+            _cs_TerritoryChanged(_svc.cs.TerritoryType);
         }
 
         private void _cs_TerritoryChanged(ushort e)
         {
             if (e == 800 || e == 804 || e == 1122)
             {
-                _lo.Debug("We're in correct zone, start looking");
+                _svc.lo.Debug("We're in correct zone, start looking");
                 StartLooking();
             }
             else
             {
-                _lo.Debug("Not in correct zone, stop looking");
+                _svc.lo.Debug("Not in correct zone, stop looking");
                 StopLooking();
             }
         }
@@ -88,9 +65,9 @@ namespace Chibi_Omega
         {
             StopLooking();
             SaveConfig();
-            _pi.UiBuilder.Draw -= DrawConfigUI;
-            _pi.UiBuilder.OpenConfigUi -= OpenConfigUI;
-            _pi.UiBuilder.OpenMainUi -= OpenConfigUI;
+            _svc.pi.UiBuilder.Draw -= DrawConfigUI;
+            _svc.pi.UiBuilder.OpenConfigUi -= OpenConfigUI;
+            _svc.pi.UiBuilder.OpenMainUi -= OpenConfigUI;
             UnloadTextures();
         }
 
@@ -106,7 +83,7 @@ namespace Chibi_Omega
 
         internal ISharedImmediateTexture GetTexture(uint id)
         {
-            return _tp.GetFromGameIcon(new GameIconLookup() { IconId = id });
+            return _svc.tp.GetFromGameIcon(new GameIconLookup() { IconId = id });
         }
 
         private void OnCommand(string command, string args)
@@ -116,8 +93,8 @@ namespace Chibi_Omega
 
         public void SaveConfig()
         {
-            _lo.Debug("Saving config");
-            _pi.SavePluginConfig(_cfg);
+            _svc.lo.Debug("Saving config");
+            _svc.pi.SavePluginConfig(_cfg);
         }
 
         private void LookForOmega()
@@ -136,7 +113,7 @@ namespace Chibi_Omega
             {
                 if (_lookingForOmega == false)
                 {
-                    _pi.UiBuilder.Draw += LookForOmega;
+                    _svc.pi.UiBuilder.Draw += LookForOmega;
                     _lookingForOmega = true;
                 }
             }
@@ -148,7 +125,7 @@ namespace Chibi_Omega
             {
                 if (_lookingForOmega == true)
                 {
-                    _pi.UiBuilder.Draw -= LookForOmega;
+                    _svc.pi.UiBuilder.Draw -= LookForOmega;
                     _lookingForOmega = false;
                 }
             }
@@ -156,7 +133,7 @@ namespace Chibi_Omega
 
         private unsafe void ManipulateOmegaChan()
         {
-            foreach (IGameObject go in _ot)
+            foreach (IGameObject go in _svc.ot)
             {
                 if (go is Character)
                 {
@@ -165,18 +142,18 @@ namespace Chibi_Omega
                     CharacterData cd = bcs->CharacterData;
                     if (
                         // alphascape version for testing
-                        (cd.ModelCharaId == 327 && (_cfg.ApplyOnP1 == true || _cfg.ApplyOnP3 == true))
+                        (bcs->ModelContainer.ModelCharaId == 327 && (_cfg.ApplyOnP1 == true || _cfg.ApplyOnP3 == true))
                         ||
                         // p1 beetle
-                        (cd.ModelCharaId == 3771 && cd.Health == 8557964 && _cfg.ApplyOnP1 == true)
+                        (bcs->ModelContainer.ModelCharaId == 3771 && cd.Health == 8557964 && _cfg.ApplyOnP1 == true)
                         ||
                         // p3 final omg
-                        (cd.ModelCharaId == 3775 && cd.Health == 11125976 && _cfg.ApplyOnP3 == true)
+                        (bcs->ModelContainer.ModelCharaId == 3775 && cd.Health == 11125976 && _cfg.ApplyOnP3 == true)
                     )
                     {
                         GameObjectStruct *gos = (GameObjectStruct*)go.Address;
                         float scale;
-                        if ((cd.ModelCharaId == 327 && _cfg.ApplyOnP1 == false) || cd.ModelCharaId == 3775)
+                        if ((bcs->ModelContainer.ModelCharaId == 327 && _cfg.ApplyOnP1 == false) || bcs->ModelContainer.ModelCharaId == 3775)
                         {
                             scale = _cfg.ScaleP3;
                         }
