@@ -39,12 +39,12 @@ namespace Chibi_Omega
             {
                 HelpMessage = "Open Chibi Omega configuration"
             });
-            _cfg = _svc.pi.GetPluginConfig() as Config ?? new Config();
+            _cfg = _svc.pi.GetPluginConfig() as Config ?? new Config();            
             _svc.cs.TerritoryChanged += _cs_TerritoryChanged;
             _cs_TerritoryChanged(_svc.cs.TerritoryType);
         }
 
-        private void _cs_TerritoryChanged(ushort e)
+        private void _cs_TerritoryChanged(uint e)
         {
             if (e == 800 || e == 804 || e == 1122)
             {
